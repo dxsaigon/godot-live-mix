@@ -225,6 +225,15 @@ CHANGES
 See CHANGELOG.md for what changed in each version.
 
 
+AUTHOR
+------
+
+Designed by Thomas Grové at Studio Interrupt.
+
+  https://studiointerrupt.com/
+  https://www.youtube.com/dxsaigon
+
+
 LICENSE
 -------
 

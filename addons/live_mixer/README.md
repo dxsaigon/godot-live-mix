@@ -91,6 +91,13 @@ Parts of this plugin were written with AI assistance and reviewed by the author.
 
 See [CHANGELOG.md](CHANGELOG.md) for what changed in each version.
 
+## Author
+
+Designed by Thomas Grové at Studio Interrupt.
+
+* https://studiointerrupt.com/
+* https://www.youtube.com/dxsaigon
+
 ## License
 
 MIT. See [LICENSE](LICENSE). Copyright (c) 2026 Studio Interrupt Ltd.
