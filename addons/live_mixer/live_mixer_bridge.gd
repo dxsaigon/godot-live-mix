@@ -66,7 +66,7 @@ const NOISE_FILE_LUFS: float = -20.0
 ## game runs embedded in the editor, the editor sees the key too (F7, for
 ## one, opens its debugger panel).
 const HOLD_SOLO_KEY: Key = KEY_P
-## How far "With game" turns the game and the noise down. -3 makes two
+## How far "Both" turns the game and the noise down. -3 makes two
 ## equally loud signals sum to the target.
 const WITH_GAME_DUCK_DB: float = -3.0
 
@@ -386,7 +386,7 @@ func _create_noise_player() -> bool:
 	return true
 
 
-## Adds or removes the hidden -3 dB at the start of Master for "With game".
+## Adds or removes the hidden -3 dB at the start of Master for "Both".
 func _set_duck(on: bool) -> void:
 	var index: int = -1
 	for e: int in AudioServer.get_bus_effect_count(0):

@@ -34,16 +34,19 @@ FEATURES
   ±0.1), double-click for 0 dB. Or type a value in the dB field and
   press Enter.
 
-- Desk layout: each bus on its own card, with Master at the far right
-  on a tinted card.
+- Desk layout: each bus on its own card. Master sits at the far right
+  on a tinted card, pinned with Discard, Commit and the reference noise
+  above it, so it stays in view while the other buses scroll.
 
 - Effects accordion: one control shows or hides every bus's effects
-  together: a slim "▾ Effects" line when closed, and just a small "▴"
-  beside the lists when open. Each list is as tall as the bus with the
+  together. Its arrow sits at the dock's left edge and never scrolls
+  away ("▾" closed, "▴" open), with a slim "Effects" line beside it when
+  closed. Each list is as tall as the bus with the
   most effects needs, so nothing is hidden behind a scrollbar.
 
-- No forced size: the strips scroll both ways when the dock is small,
-  and the top rows wrap when it's narrow.
+- No forced size: the buses scroll sideways when they don't fit, the
+  dock scrolls up and down when it's short, and the loudness readouts
+  split over two rows when it's narrow.
 
 - Commit / Discard: changes only exist in the running game until you
   press Commit, which writes them into the project's bus layout. Only
@@ -59,7 +62,7 @@ FEATURES
   value. Saved per project.
 
 - Reference pink noise at exactly the target loudness:
-    * With game: the noise plays alongside the game, with both turned
+    * Both: the noise plays alongside the game, with both turned
       down 3 dB so a game mixed on target plus the noise still totals
       the target.
     * Solo: only the noise plays, so you can compare it with the game
@@ -120,8 +123,8 @@ USING THE LOUDNESS METER
 ------------------------
 
 - I (integrated) is the number to match to the target. It covers the
-  whole play session since the last Reset, and starts fresh with every
-  run. It pauses while the reference noise plays.
+  whole play session since the last Reset (which also clears the clip
+  lights), and starts fresh with every run. It pauses while the reference noise plays.
 
 - Readouts are green within ±2 LU of the target, amber below and red
   above. TP turns red above -1 dBTP.

@@ -14,20 +14,38 @@ extends EditorDock
 ## meters. Remembered per project, and applied to each new run as soon as
 ## the game connects.
 ##
-## Nothing forces the dock's size: the strips scroll both ways when they
-## don't fit, and the header and loudness rows wrap onto more lines when
-## the dock is narrow.
+## LAYOUT: two columns. On the left: Active, the status and the target on
+## one row; the loudness readouts and Reset on the next (split over two rows
+## when the dock is narrow; see live_mixer_loudness_bar.gd); then the bus
+## strips, which narrow and then scroll sideways when they don't fit. On the
+## right, pinned so they never scroll away: Discard and Commit, Ref noise and
+## its mode, and Master's strip below them, like the master section of a
+## desk. The right column is a strip's width unless its buttons need more.
+##
+## The whole dock scrolls up and down when it's short.
 ##
 ## EFFECTS: one accordion opens or closes every bus's effect list together.
-## Closed, it's a slim "▾ Effects" line tucked under the dB boxes. Open, the
-## lists sit under their strips with a narrow tab at their left holding just
-## "▴", which closes it again, so the open state spends no height on a title
-## row. The strips row starts with a gap the tab's width so each list stays
-## under its strip. Each list is as tall as the bus with the
-## most effects needs, so nothing in it scrolls. Remembered per project.
+## A narrow tab in a gutter at the dock's left edge, outside the scrolling
+## strips, always holds the arrow: "▾" when closed, "▴" when open, and
+## clicking it toggles. Closed, the word "Effects" sits beside it under the
+## first strip (also clickable), and Master gets an empty space the same
+## height so its bottom stays level. Open, the lists sit under their strips,
+## level with the tab, so the open state spends no height on a title row.
+## The top rows start after the same gutter, so everything shares one left
+## edge. Neither has a tooltip: in a floating dock, a tooltip starting on
+## a button that has just hidden itself made Godot fail to create windows.
 ##
-## Strips sit on faint cards. Master is last, at the far right after a gap,
-## with a tinted card, like the master section of a desk.
+## Each list is as tall as the bus with the most effects needs, so nothing
+## in it scrolls. Open or closed is remembered per project.
+##
+## STRIP WIDTH: the buses share the strip area. Each is STRIP_WIDTH wide when
+## there's room, narrows (down to what its controls need) when there isn't,
+## and only then does the area scroll. Master keeps its column's width.
+##
+## Strips sit on faint cards; Master's is tinted. Master's effects sit in its
+## own column, and spacers under them keep its bottom level with the other
+## strips whether the accordion is open or closed and whether the
+## sideways scrollbar is showing.
 ##
 ## Edits survive the game stopping, so you can tune, quit, then Commit.
 ## Starting a new run drops any edits that weren't committed, with a
@@ -38,10 +56,15 @@ const LiveMixerDebugger: GDScript = preload("live_mixer_debugger.gd")
 const LiveMixerLoudnessBar: GDScript = preload("live_mixer_loudness_bar.gd")
 
 const SILENT_THRESHOLD_DB: float = -199.0
-## Shown on the open Effects tab; the closed line reads "▾ Effects".
+## The Effects tab's arrow, open and closed.
 const FX_OPEN_ARROW: String = "▴"
+const FX_CLOSED_ARROW: String = "▾"
 ## Space between the last bus and Master, at 100% display scale.
 const MASTER_GAP: float = 10.0
+## Side padding of Discard and Commit, at 100% display scale, so they fit
+## the column above Master. Matches the loudness row's COMPACT_PAD.
+const COMPACT_PAD: float = 4.0
+const STATUS_TEXTS: Array[String] = ["‖ Paused", "● Live", "○ Not running", "● Stopped"]
 
 var _debugger: LiveMixerDebugger = null
 var _status: Label = null
@@ -63,15 +86,29 @@ var _paused_note: Label = null
 var _scroll: ScrollContainer = null
 var _fx_toggle: Button = null
 var _fx_row: HBoxContainer = null
-## The sideways tab shown at the left of the open Effects lists.
+## The narrow tab in the left gutter holding the Effects arrow.
 var _fx_tab: Button = null
 var _fx_open_box: HBoxContainer = null
-## Matches the tab's width at the start of the strips row.
-var _strip_spacer: Control = null
-## Gaps before Master, which sits at the far right as on a mixing desk. One in
-## the strips row and one in the Effects row, so the columns stay lined up.
-var _master_gap: Control = null
-var _master_gap_fx: Control = null
+## The bus strips (all but Master), scrolling sideways.
+var _strip_scroll: ScrollContainer = null
+## Above Master: Discard and Commit, then Ref noise and its mode.
+var _right_top: VBoxContainer = null
+var _edit_row: HBoxContainer = null
+var _noise_row: HBoxContainer = null
+var _reset_button: Button = null
+## Master's strip, then its effects or the spacers that stand in for the
+## closed Effects line and the sideways scrollbar.
+var _master_col: VBoxContainer = null
+var _fx_closed_spacer: Control = null
+var _tab_col: VBoxContainer = null
+var _tab_scroll_spacer: Control = null
+var _top_right: HBoxContainer = null
+var _top_tab_spacer: Control = null
+var _master_scroll_spacer: Control = null
+var _width_sync_queued: bool = false
+var _body: HBoxContainer = null
+var _strip_content: VBoxContainer = null
+var _strip_fit_queued: bool = false
 
 
 func _init() -> void:
@@ -99,12 +136,34 @@ func setup(debugger: LiveMixerDebugger) -> void:
 
 
 func _build() -> void:
-	var column: VBoxContainer = VBoxContainer.new()
-	add_child(column)
+	var ui_scale: float = EditorInterface.get_editor_scale()
+	var column_gap: int = int(round(MASTER_GAP * ui_scale))
 
-	# Wraps instead of forcing the dock wide.
-	var header: HFlowContainer = HFlowContainer.new()
-	column.add_child(header)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	add_child(_scroll)
+
+	var column: VBoxContainer = VBoxContainer.new()
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	column.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(column)
+
+	var top: HBoxContainer = HBoxContainer.new()
+	top.add_theme_constant_override(&"separation", column_gap)
+	column.add_child(top)
+
+	# The loudness block is the left block: Active and the status start its
+	# first row, and Reset heads the readouts under it.
+	var left_top: HBoxContainer = HBoxContainer.new()
+	left_top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_top.add_theme_constant_override(&"separation", 0)
+	top.add_child(left_top)
+	_top_tab_spacer = Control.new()
+	left_top.add_child(_top_tab_spacer)
+	_loudness = LiveMixerLoudnessBar.new()
+	_loudness.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_top.add_child(_loudness)
+	var header: HBoxContainer = _loudness.get_header_cell()
 
 	_active_switch = CheckButton.new()
 	_active_switch.text = "Active"
@@ -114,28 +173,43 @@ func _build() -> void:
 	header.add_child(_active_switch)
 
 	_status = Label.new()
-	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(_status)
 
-	var clips_button: Button = Button.new()
-	clips_button.text = "Reset clips"
-	clips_button.tooltip_text = "Clear every bus's clip light and peak hold."
-	clips_button.pressed.connect(_on_reset_clips_pressed)
-	header.add_child(clips_button)
+	_reset_button = Button.new()
+	_reset_button.text = "Reset"
+	_reset_button.tooltip_text = "Clear every bus's clip light and peak hold, and start a new loudness measurement (integrated and true peak)."
+	_reset_button.pressed.connect(_on_reset_pressed)
+	_loudness.get_reset_cell().add_child(_reset_button)
 
+	_top_right = HBoxContainer.new()
+	_top_right.add_theme_constant_override(&"separation", 0)
+	top.add_child(_top_right)
+	_right_top = VBoxContainer.new()
+	_top_right.add_child(_right_top)
+	# Tells the loudness grid how much room it has, so it can split the
+	# readouts over two rows instead of forcing the dock wide.
+	_scroll.resized.connect(_fit_loudness)
+	_top_right.resized.connect(_fit_loudness)
+	_scroll.get_v_scroll_bar().visibility_changed.connect(_fit_loudness)
+
+	_edit_row = HBoxContainer.new()
+	_right_top.add_child(_edit_row)
 	_discard_button = Button.new()
 	_discard_button.text = "Discard"
-	_discard_button.tooltip_text = "Put the running game back the way it was before your edits, and forget them."
+	_discard_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_discard_button.pressed.connect(_on_discard_pressed)
-	header.add_child(_discard_button)
-
+	_edit_row.add_child(_discard_button)
 	_commit_button = Button.new()
-	_commit_button.tooltip_text = "Write your edits into the project's bus layout file."
+	_commit_button.text = "Commit"
+	_commit_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_commit_button.pressed.connect(_on_commit_pressed)
-	header.add_child(_commit_button)
+	_edit_row.add_child(_commit_button)
 
-	_loudness = LiveMixerLoudnessBar.new()
-	column.add_child(_loudness)
+	_noise_row = _loudness.get_noise_controls()
+	_right_top.add_child(_noise_row)
+
+	for row: Control in [_edit_row, _noise_row]:
+		row.minimum_size_changed.connect(_queue_width_sync)
 
 	_paused_note = Label.new()
 	_paused_note.text = "Paused. The game isn't metering or sending anything. Switch Active on to resume."
@@ -143,60 +217,96 @@ func _build() -> void:
 	_paused_note.visible = false
 	column.add_child(_paused_note)
 
-	# Scrolls both ways, like the stock Audio panel, instead of forcing a
-	# minimum size on the dock.
-	_scroll = ScrollContainer.new()
-	_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	column.add_child(_scroll)
+	var body: HBoxContainer = HBoxContainer.new()
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override(&"separation", column_gap)
+	column.add_child(body)
+	_body = body
+
+	# The gutter with the Effects arrow, then the strips.
+	var left_side: HBoxContainer = HBoxContainer.new()
+	left_side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_side.add_theme_constant_override(&"separation", 0)
+	body.add_child(left_side)
+	_tab_col = VBoxContainer.new()
+	_tab_col.add_theme_constant_override(&"separation", 0)
+	left_side.add_child(_tab_col)
+
+	# Sideways only; the outer scroll handles up and down for the whole dock.
+	_strip_scroll = ScrollContainer.new()
+	_strip_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_strip_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_strip_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left_side.add_child(_strip_scroll)
+	var bar: HScrollBar = _strip_scroll.get_h_scroll_bar()
+	bar.visibility_changed.connect(_sync_master_spacers)
+	bar.resized.connect(_sync_master_spacers)
 
 	var content: VBoxContainer = VBoxContainer.new()
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	# No gap between the strips and the Effects row below them.
 	content.add_theme_constant_override(&"separation", 0)
-	_scroll.add_child(content)
+	_strip_scroll.add_child(content)
+	_strip_content = content
+	content.resized.connect(_sync_master_spacers)
+	_strip_scroll.resized.connect(_sync_master_spacers)
+	_strip_scroll.resized.connect(_queue_strip_fit)
 
 	_strip_row = HBoxContainer.new()
 	_strip_row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(_strip_row)
-	_strip_spacer = Control.new()
-	_strip_row.add_child(_strip_spacer)
 
-	# Closed: one slim line. Its pressed state is the accordion's state.
+	# Closed: the "Effects" line, under the first strip. Built here, filled
+	# in below.
 	_fx_toggle = Button.new()
+	content.add_child(_fx_toggle)
+
+	# Open: the lists.
+	_fx_open_box = HBoxContainer.new()
+	content.add_child(_fx_open_box)
+
+	# Its pressed state is the accordion's state.
 	_fx_toggle.flat = true
 	_fx_toggle.toggle_mode = true
 	_fx_toggle.button_pressed = true
 	_fx_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_fx_toggle.text = "▾ Effects"
-	_fx_toggle.tooltip_text = "Show every bus's effects."
+	_fx_toggle.text = "Effects"
 	_fx_toggle.toggled.connect(_on_effects_toggled)
-	content.add_child(_fx_toggle)
 
-	# Open: the sideways tab, then the lists.
-	_fx_open_box = HBoxContainer.new()
-	content.add_child(_fx_open_box)
 	_fx_tab = Button.new()
 	_fx_tab.flat = true
-	_fx_tab.tooltip_text = "Hide every bus's effects."
 	_fx_tab.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_fx_tab.size_flags_vertical = Control.SIZE_FILL
-	_fx_tab.pressed.connect(func() -> void: _fx_toggle.button_pressed = false)
+	_fx_tab.pressed.connect(func() -> void: _fx_toggle.button_pressed = not _fx_toggle.button_pressed)
 	_fx_tab.draw.connect(_draw_fx_tab)
-	_fx_tab.resized.connect(func() -> void: _strip_spacer.custom_minimum_size = Vector2(_fx_tab.size.x, 0.0))
 	_fx_tab.mouse_entered.connect(_fx_tab.queue_redraw)
 	_fx_tab.mouse_exited.connect(_fx_tab.queue_redraw)
-	_fx_open_box.add_child(_fx_tab)
 	_fx_row = HBoxContainer.new()
 	_fx_open_box.add_child(_fx_row)
 
-	var gap: Vector2 = Vector2(MASTER_GAP * EditorInterface.get_editor_scale(), 0.0)
-	_master_gap = Control.new()
-	_master_gap.custom_minimum_size = gap
-	_master_gap_fx = Control.new()
-	_master_gap_fx.custom_minimum_size = gap
+	# The gutter: empty space, then the tab level with the effects lists,
+	# then the scrollbar's height.
+	var above_tab: Control = Control.new()
+	above_tab.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_tab_col.add_child(above_tab)
+	_tab_col.add_child(_fx_tab)
+	_tab_scroll_spacer = Control.new()
+	_tab_col.add_child(_tab_scroll_spacer)
+
+	# Master's column. Its strip is added when the game reports its buses.
+	_master_col = VBoxContainer.new()
+	_master_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_master_col.add_theme_constant_override(&"separation", 0)
+	body.add_child(_master_col)
+	# Closed: stands in for the "Effects" line.
+	_fx_closed_spacer = Control.new()
+	_master_col.add_child(_fx_closed_spacer)
+	_master_scroll_spacer = Control.new()
+	_master_col.add_child(_master_scroll_spacer)
 
 	_update_buttons()
+	_queue_width_sync()
 
 
 func _on_running_changed(running: bool) -> void:
@@ -231,8 +341,9 @@ func _send_active() -> void:
 
 func _apply_active_view() -> void:
 	var on: bool = _active_switch.button_pressed
-	_scroll.visible = on
-	_loudness.visible = on
+	_body.visible = on
+	_loudness.set_meters_visible(on)
+	_noise_row.visible = on
 	_paused_note.visible = not on
 	if not on:
 		_loudness.on_run_stopped()
@@ -249,39 +360,113 @@ func _on_effects_toggled(open: bool) -> void:
 func _apply_effects_open() -> void:
 	var open: bool = _fx_toggle.button_pressed
 	_fx_open_box.visible = open
+	_fx_tab.queue_redraw()
 	_fx_toggle.visible = not open
+	_fx_closed_spacer.visible = not open
+	if not _strips.is_empty():
+		_strips[0].get_effects_panel().visible = open
+	_sync_master_spacers()
+
+
+## Keeps Master's bottom level with the other strips: Master gets an empty
+## space as tall as the closed "Effects" line, the tab is as tall as whatever
+## sits beside it, and under Master and the tab goes whatever space the strip
+## area keeps below its content (scrollbar and theme gaps).
+func _sync_master_spacers() -> void:
+	if _fx_closed_spacer == null:
+		return
+	_fx_closed_spacer.custom_minimum_size = Vector2(0.0, _fx_toggle.get_combined_minimum_size().y)
+	# As tall as whatever sits beside it: the lists, or the "Effects" line.
+	var beside: float = _fx_toggle.get_combined_minimum_size().y
+	if _fx_toggle.button_pressed and not _strips.is_empty():
+		beside = _strips[0].get_effects_panel().get_combined_minimum_size().y
+	_fx_tab.custom_minimum_size = Vector2(_fx_tab.custom_minimum_size.x, beside)
+	# Measured, not worked out from the theme: whatever the scroll container
+	# keeps below its content (the bar, plus any gap or margin the editor
+	# theme adds) is matched under Master.
+	var reserved: float = maxf(0.0, _strip_scroll.size.y - _strip_content.size.y)
+	_master_scroll_spacer.custom_minimum_size = Vector2(0.0, reserved)
+	_tab_scroll_spacer.custom_minimum_size = Vector2(0.0, reserved)
+
+
+func _fit_loudness() -> void:
+	var gap: float = float(_top_right.get_parent().get_theme_constant(&"separation"))
+	var width: float = _scroll.size.x - _top_right.size.x - gap - _top_tab_spacer.size.x
+	var bar: VScrollBar = _scroll.get_v_scroll_bar()
+	if bar.visible:
+		width -= bar.size.x
+	_loudness.fit_width(width)
+
+
+## The status is as wide as its longest text, so the target picker after it
+## doesn't move when the status changes.
+func _fix_status_width() -> void:
+	var font: Font = _status.get_theme_font(&"font")
+	var font_size: int = _status.get_theme_font_size(&"font_size")
+	var widest: float = 0.0
+	for text: String in STATUS_TEXTS:
+		widest = maxf(widest, font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x)
+	var style: StyleBox = _status.get_theme_stylebox(&"normal")
+	var pad: float = style.get_margin(SIDE_LEFT) + style.get_margin(SIDE_RIGHT) if style != null else 0.0
+	_status.custom_minimum_size = Vector2(ceilf(widest + pad), 0.0)
+
+
+func _queue_width_sync() -> void:
+	if _width_sync_queued:
+		return
+	_width_sync_queued = true
+	_sync_master_width.call_deferred()
+
+
+## Master's column and the controls above it share one width: a strip's
+## full width, or wider if the buttons above need it. Worked out from those
+## needs, not Master's current width, so the column can shrink again (e.g.
+## after the display scale goes down).
+func _sync_master_width() -> void:
+	_width_sync_queued = false
+	var width: float = maxf(_edit_row.get_combined_minimum_size().x, _noise_row.get_combined_minimum_size().x)
+	width = maxf(width, LiveMixerStrip.STRIP_WIDTH * EditorInterface.get_editor_scale())
+	if not _strips.is_empty():
+		width = maxf(width, _strips[0].get_compact_width())
+	_right_top.custom_minimum_size = Vector2(width, 0.0)
+	_master_col.custom_minimum_size = Vector2(width, 0.0)
+	if not _strips.is_empty():
+		_strips[0].set_strip_width(width)
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE:
-		# The gaps are only in the tree while there are buses to separate.
-		for gap: Control in [_master_gap, _master_gap_fx]:
-			if is_instance_valid(gap) and gap.get_parent() == null:
-				gap.free()
 	if what == NOTIFICATION_THEME_CHANGED and _fx_tab != null:
 		_size_fx_tab()
+		_fix_status_width.call_deferred()
 		# Deferred, so the button has its own theme by then.
 		_tighten_fx_toggle.call_deferred()
+		_compact_edit_buttons.call_deferred()
+		_flush_active_switch.call_deferred()
+		_queue_strip_fit()
+		_sync_master_spacers.call_deferred()
+		_queue_width_sync()
 
 
-## Just wide enough for "▴" with a little padding either side.
+## Just wide enough for the arrow with a little padding either side.
 func _size_fx_tab() -> void:
 	var font: Font = _fx_tab.get_theme_font(&"font")
 	var font_size: int = _fx_tab.get_theme_font_size(&"font_size")
 	var pad: float = 3.0 * EditorInterface.get_editor_scale()
 	var arrow: Vector2 = font.get_string_size(FX_OPEN_ARROW, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size)
 	var width: float = ceilf(arrow.x + pad * 2.0)
-	_fx_tab.custom_minimum_size = Vector2(width, ceilf(font.get_height(font_size) + pad * 2.0))
-	_sync_strip_spacer.call_deferred()
+	_fx_tab.custom_minimum_size = Vector2(width, maxf(_fx_tab.custom_minimum_size.y, ceilf(font.get_height(font_size) + pad * 2.0)))
+	_reserve_tab_width.call_deferred()
 
 
-## The gap at the start of the strips row matches the tab's real width (its
-## own padding included), so every list sits exactly under its strip.
-func _sync_strip_spacer() -> void:
-	_strip_spacer.custom_minimum_size = Vector2(_fx_tab.get_combined_minimum_size().x, 0.0)
+## The tab's full width (its own padding included) is kept even while it's
+## hidden, so neither Master nor the strip area moves when it opens or closes.
+func _reserve_tab_width() -> void:
+	var width: float = _fx_tab.get_combined_minimum_size().x
+	_tab_col.custom_minimum_size = Vector2(width, 0.0)
+	_top_tab_spacer.custom_minimum_size = Vector2(width, 0.0)
 
 
-## Trims the closed "▾ Effects" line's padding top and bottom so it sits
+## Trims the closed "Effects" line's padding top and bottom so it sits
 ## close under the dB boxes.
 func _tighten_fx_toggle() -> void:
 	var ui_scale: float = EditorInterface.get_editor_scale()
@@ -293,14 +478,68 @@ func _tighten_fx_toggle() -> void:
 		_fx_toggle.add_theme_stylebox_override(style_name, style)
 
 
-## "▴" at the top of the tab.
+## Narrower side padding on Discard and Commit, from the theme's own
+## styles, so they fit side by side above Master.
+func _compact_edit_buttons() -> void:
+	var pad: float = COMPACT_PAD * EditorInterface.get_editor_scale()
+	for button: Button in [_discard_button, _commit_button]:
+		for style_name: StringName in [&"normal", &"hover", &"pressed", &"hover_pressed", &"disabled"]:
+			button.remove_theme_stylebox_override(style_name)
+			var style: StyleBox = button.get_theme_stylebox(style_name).duplicate() as StyleBox
+			style.content_margin_left = pad
+			style.content_margin_right = pad
+			button.add_theme_stylebox_override(style_name, style)
+	_queue_width_sync()
+
+
+## No left padding on the Active switch, so its text starts at the same edge
+## as Reset and the first strip.
+func _flush_active_switch() -> void:
+	for style_name: StringName in [&"normal", &"hover", &"pressed", &"hover_pressed", &"disabled", &"focus"]:
+		_active_switch.remove_theme_stylebox_override(style_name)
+		var style: StyleBox = _active_switch.get_theme_stylebox(style_name).duplicate() as StyleBox
+		style.content_margin_left = 0.0
+		_active_switch.add_theme_stylebox_override(style_name, style)
+
+
+func _queue_strip_fit() -> void:
+	if _strip_fit_queued:
+		return
+	_strip_fit_queued = true
+	_fit_strips.call_deferred()
+
+
+## Splits the strip area between the buses: full width if they all fit,
+## narrower if not, but never narrower than the widest compact strip (so
+## every bus stays the same width). Past that, the area scrolls.
+func _fit_strips() -> void:
+	_strip_fit_queued = false
+	var count: int = _strips.size() - 1
+	if count <= 0:
+		return
+	var full: float = LiveMixerStrip.STRIP_WIDTH * EditorInterface.get_editor_scale()
+	var compact: float = 0.0
+	for i: int in range(1, _strips.size()):
+		compact = maxf(compact, _strips[i].get_compact_width())
+	var gap: float = float(_strip_row.get_theme_constant(&"separation"))
+	var share: float = floorf((_strip_scroll.size.x - gap * float(count - 1)) / float(count))
+	var width: float = clampf(share, compact, maxf(full, compact))
+	for i: int in range(1, _strips.size()):
+		_strips[i].set_strip_width(width)
+
+
+## The arrow, centred on the first line beside it (the "Effects" line, or
+## the lists' first row, which is the same height).
 func _draw_fx_tab() -> void:
 	var font: Font = _fx_tab.get_theme_font(&"font")
 	var font_size: int = _fx_tab.get_theme_font_size(&"font_size")
 	var pad: float = 3.0 * EditorInterface.get_editor_scale()
 	var color: Color = _fx_tab.get_theme_color(&"font_hover_color" if _fx_tab.is_hovered() else &"font_color")
-	var arrow_width: float = font.get_string_size(FX_OPEN_ARROW, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x
-	_fx_tab.draw_string(font, Vector2((_fx_tab.size.x - arrow_width) * 0.5, pad + font.get_ascent(font_size)), FX_OPEN_ARROW, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, color)
+	var arrow: String = FX_OPEN_ARROW if _fx_toggle.button_pressed else FX_CLOSED_ARROW
+	var arrow_width: float = font.get_string_size(arrow, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x
+	var line: float = minf(_fx_tab.size.y, _fx_toggle.get_combined_minimum_size().y)
+	var baseline: float = (line - font.get_height(font_size)) * 0.5 + font.get_ascent(font_size)
+	_fx_tab.draw_string(font, Vector2((_fx_tab.size.x - arrow_width) * 0.5, baseline), arrow, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size, color)
 
 
 ## Every list gets as many rows as the bus with the most effects.
@@ -322,6 +561,7 @@ func _on_state_received(buses: Array) -> void:
 	for i: int in buses.size():
 		_strips[i].apply_state(buses[i] as Dictionary)
 	_size_effect_rows()
+	_sync_master_spacers.call_deferred()
 	if not buses.is_empty():
 		_loudness.set_master_db(float((buses[0] as Dictionary)["volume_db"]))
 	_refresh_edit_tints()
@@ -340,16 +580,13 @@ func _rebuild_strips(names: Array[String]) -> void:
 	_bus_names = names
 	for strip: LiveMixerStrip in _strips:
 		var effects_panel: PanelContainer = strip.get_effects_panel()
-		_fx_row.remove_child(effects_panel)
+		effects_panel.get_parent().remove_child(effects_panel)
 		effects_panel.queue_free()
-		_strip_row.remove_child(strip)
+		strip.get_parent().remove_child(strip)
 		strip.queue_free()
 	_strips.clear()
-	if _master_gap.get_parent() != null:
-		_strip_row.remove_child(_master_gap)
-		_fx_row.remove_child(_master_gap_fx)
 	# _strips stays in bus order (0 = Master), which is how the game reports
-	# them; only the children are reordered, putting Master last.
+	# them. Master goes in its own pinned column; the rest scroll.
 	for bus_name: String in names:
 		var strip: LiveMixerStrip = LiveMixerStrip.new()
 		strip.edited.connect(_on_strip_edited)
@@ -358,12 +595,17 @@ func _rebuild_strips(names: Array[String]) -> void:
 		_strip_row.add_child(_strips[i])
 		_fx_row.add_child(_strips[i].get_effects_panel())
 	if not _strips.is_empty():
-		if _strips.size() > 1:
-			_strip_row.add_child(_master_gap)
-			_fx_row.add_child(_master_gap_fx)
-		_strip_row.add_child(_strips[0])
-		_fx_row.add_child(_strips[0].get_effects_panel())
-		_strips[0].set_master(true)
+		var master: LiveMixerStrip = _strips[0]
+		master.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		_master_col.add_child(master)
+		_master_col.move_child(master, 0)
+		var panel: PanelContainer = master.get_effects_panel()
+		_master_col.add_child(panel)
+		_master_col.move_child(panel, 1)
+		master.set_master(true)
+	_apply_effects_open()
+	_queue_width_sync()
+	_queue_strip_fit()
 	_update_status()
 
 
@@ -497,9 +739,10 @@ func _apply_to_editor(bus: int, key: String, value: Variant) -> bool:
 	return true
 
 
-func _on_reset_clips_pressed() -> void:
+func _on_reset_pressed() -> void:
 	for strip: LiveMixerStrip in _strips:
 		strip.reset_meter()
+	_loudness.reset_measurement()
 
 
 func _refresh_edit_tints() -> void:
@@ -545,6 +788,10 @@ func _set_status(text: String, color: Color, tip: String) -> void:
 
 func _update_buttons() -> void:
 	var count: int = _edit_count()
-	_commit_button.text = "Commit (%d)" % count if count > 0 else "Commit"
+	# The count lives in the tooltips, so Commit keeps one width and the
+	# column above Master stays narrow. Edited controls are tinted anyway.
+	var changes: String = "%d change%s" % [count, "" if count == 1 else "s"]
+	_commit_button.tooltip_text = "Write your edits into the project's bus layout file (%s)." % changes if count > 0 else "Write your edits into the project's bus layout file. Nothing to commit yet."
+	_discard_button.tooltip_text = "Put the running game back the way it was before your edits, and forget them (%s)." % changes if count > 0 else "Put the running game back the way it was before your edits. Nothing to discard yet."
 	_commit_button.disabled = count == 0
 	_discard_button.disabled = count == 0

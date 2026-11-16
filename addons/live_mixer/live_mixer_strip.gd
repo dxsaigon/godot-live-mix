@@ -16,6 +16,12 @@ extends PanelContainer
 ## Sizes are given at 100% and multiplied by the editor's display scale, so
 ## the strip keeps its proportions on high-DPI screens.
 ##
+## WIDTH: the dock sets it (set_strip_width()), from STRIP_WIDTH down to
+## get_compact_width() when the dock is narrow. The controls stay left-aligned
+## with each other as one block, and that block is centred on the card. The
+## bus name and send line start at the block's left edge but may use the
+## card's spare room to the right, and end in "…" when even that's too short.
+##
 ## Emits edited() when the user changes something. Incoming state from the
 ## game updates the controls without emitting, and is skipped for the fader
 ## while it's being dragged, so the game's echo can't fight the mouse.
@@ -67,11 +73,17 @@ var _effects_box: VBoxContainer = null
 var _compact_style: StyleBoxEmpty = null
 var _effect_names: Array[String] = []
 var _effect_rows: int = 1
+## Holds the column; its left margin centres the block on the card.
+var _inset: MarginContainer = null
+var _toggles: HBoxContainer = null
+var _meter_row: HBoxContainer = null
+var _strip_width: float = 0.0
 
 
 func _init() -> void:
 	var ui_scale: float = EditorInterface.get_editor_scale()
-	custom_minimum_size = Vector2(STRIP_WIDTH * ui_scale, 0.0)
+	_strip_width = STRIP_WIDTH * ui_scale
+	custom_minimum_size = Vector2(_strip_width, 0.0)
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_card = StyleBoxFlat.new()
 	_card.bg_color = CARD_COLOR
@@ -95,6 +107,7 @@ func _notification(what: int) -> void:
 		_square_toggles.call_deferred()
 		_fit_db_box.call_deferred()
 		_style_labels.call_deferred()
+		_centre_block.call_deferred()
 	if what == NOTIFICATION_PREDELETE and is_instance_valid(_effects_panel):
 		# The effects panel lives in the dock's Effects row, not under this
 		# strip, so it isn't freed with it.
@@ -102,8 +115,12 @@ func _notification(what: int) -> void:
 
 
 func _build() -> void:
+	_inset = MarginContainer.new()
+	for side: StringName in [&"margin_left", &"margin_top", &"margin_right", &"margin_bottom"]:
+		_inset.add_theme_constant_override(side, 0)
+	add_child(_inset)
 	var column: VBoxContainer = VBoxContainer.new()
-	add_child(column)
+	_inset.add_child(column)
 
 	# Name, mute / solo / bypass and send packed together with no spacing,
 	# so the top of the strip stays compact. The rest keeps normal spacing.
@@ -119,11 +136,13 @@ func _build() -> void:
 	_name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	_name_label.clip_text = true
 	_name_label.add_theme_stylebox_override(&"normal", flush)
+	_name_label.resized.connect(_fit_label.bind(_name_label))
 	top.add_child(_name_label)
 
 	# Mute / solo / bypass straight under the name, as in the stock Audio
 	# panel and Fairlight.
 	var toggles: HBoxContainer = HBoxContainer.new()
+	_toggles = toggles
 	toggles.alignment = BoxContainer.ALIGNMENT_BEGIN
 	toggles.add_theme_constant_override(&"separation", int(round(TOGGLE_GAP * EditorInterface.get_editor_scale())))
 	top.add_child(toggles)
@@ -136,9 +155,11 @@ func _build() -> void:
 	_send_label.modulate = Color(1.0, 1.0, 1.0, 0.5)
 	_send_label.clip_text = true
 	_send_label.add_theme_stylebox_override(&"normal", flush)
+	_send_label.resized.connect(_fit_label.bind(_send_label))
 	top.add_child(_send_label)
 
 	var row: HBoxContainer = HBoxContainer.new()
+	_meter_row = row
 	row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	column.add_child(row)
@@ -169,6 +190,35 @@ func _style_labels() -> void:
 	_send_label.remove_theme_font_size_override(&"font_size")
 	var base_size: int = _send_label.get_theme_font_size(&"font_size")
 	_send_label.add_theme_font_size_override(&"font_size", maxi(1, int(round(base_size * SEND_FONT_SCALE))))
+	# New fonts, new widths.
+	_fit_label(_name_label)
+	_fit_label(_send_label)
+
+
+## The narrowest the strip can be: its card padding plus the block of
+## controls (the bus name and send line can shorten with "…").
+func get_compact_width() -> float:
+	var card: float = _card.get_margin(SIDE_LEFT) + _card.get_margin(SIDE_RIGHT)
+	return ceilf(card + _block_width())
+
+
+## The dock's chosen width (never below get_compact_width()).
+func set_strip_width(width: float) -> void:
+	_strip_width = maxf(width, get_compact_width())
+	custom_minimum_size = Vector2(_strip_width, 0.0)
+	_centre_block()
+
+
+func _block_width() -> float:
+	return maxf(_meter_row.get_combined_minimum_size().x, maxf(_toggles.get_combined_minimum_size().x, _db_box.get_combined_minimum_size().x))
+
+
+## Worked out from the chosen width, never from the strip's current size, so
+## the margin can't hold the strip wider than the dock asks for.
+func _centre_block() -> void:
+	var card: float = _card.get_margin(SIDE_LEFT) + _card.get_margin(SIDE_RIGHT)
+	var spare: float = maxf(0.0, _strip_width - card - _block_width())
+	_inset.add_theme_constant_override(&"margin_left", int(floor(spare * 0.5)))
 
 
 ## Master's card is tinted so the main output is easy to find.
@@ -188,7 +238,6 @@ func _build_effects_panel() -> void:
 
 	_effects_panel = PanelContainer.new()
 	_effects_panel.add_theme_stylebox_override(&"panel", style)
-	_effects_panel.custom_minimum_size = Vector2(STRIP_WIDTH * ui_scale, 0.0)
 	_effects_panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	_effects_panel.theme_changed.connect(_size_effects_list)
 	_effects_box = VBoxContainer.new()
@@ -229,6 +278,27 @@ func _make_effect_box(text: String) -> CheckBox:
 	for style_name: StringName in [&"normal", &"pressed", &"hover", &"hover_pressed", &"disabled", &"focus"]:
 		box.add_theme_stylebox_override(style_name, _compact_style)
 	return box
+
+
+## The bus name or send line in full if it fits, otherwise as much as fits
+## plus "…". Done here rather than with the Label's own text_overrun_behavior,
+## which in 4.7 sometimes just clips the text with no "…" (seen with a bold
+## name a little too long for a narrow strip).
+func _fit_label(label: Label) -> void:
+	var full: String = str(label.get_meta(&"full_text", label.text))
+	label.text = _shorten(full, label.get_theme_font(&"font"), label.get_theme_font_size(&"font_size"), label.size.x)
+
+
+## As much of full as fits room, plus "…"; full itself if it fits.
+func _shorten(full: String, font: Font, font_size: int, room: float) -> String:
+	if room <= 0.0 or font.get_string_size(full, HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x <= room:
+		return full
+	var shown: String = full
+	while shown.length() > 1:
+		shown = shown.left(shown.length() - 1)
+		if font.get_string_size(shown + "…", HORIZONTAL_ALIGNMENT_LEFT, -1.0, font_size).x <= room:
+			break
+	return shown + "…"
 
 
 ## Shows full_name if it fits the row, otherwise as much as fits plus "…".
@@ -338,10 +408,12 @@ func _make_toggle(text: String, tip: String, key: String, parent: Container) -> 
 ## Brings the controls in line with the game's state for this bus.
 func apply_state(bus: Dictionary) -> void:
 	bus_name = str(bus["name"])
-	_name_label.text = bus_name
+	_name_label.set_meta(&"full_text", bus_name)
+	_fit_label(_name_label)
 	_name_label.tooltip_text = bus_name
 	var send: String = str(bus["send"])
-	_send_label.text = ("→ " + send) if send != "" else ""
+	_send_label.set_meta(&"full_text", ("→ " + send) if send != "" else "")
+	_fit_label(_send_label)
 
 	var volume_db: float = float(bus["volume_db"])
 	if not bool(_fader.call(&"is_dragging")):

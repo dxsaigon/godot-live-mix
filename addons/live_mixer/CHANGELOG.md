@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 (2026-11-17)
+
+UX improvements.
+
+- Master is docked on the right, with Discard, Commit and the reference noise above it, and stays in view while the other buses scroll.
+- Strips scale more smoothly with the dock's width: they narrow before the dock starts scrolling, and long names shorten with "…".
+- The two Reset buttons are now one, which clears the clip lights and the loudness readings together.
+- The noise mode "With game" is now called "Both".
+
 ## 1.0.0 (2026-11-15)
 
 First release.

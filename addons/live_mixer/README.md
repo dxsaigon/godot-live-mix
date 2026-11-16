@@ -13,14 +13,14 @@ Ideally, Godot's own Audio tab would be fixed to allow live mixing. Until that d
 - **Live meters** for every bus of the running game: stereo peak, peak hold, a clip light, and the loudest peak since reset as a number above the bars (red above 0 dB). Click a meter to clear both. Faint colour zones show where yellow and red start, and a dB scale sits beside the bars.
 - **Live editing**: faders, mute, solo, bypass and per-effect on/off take effect in the game straight away.
 - **Faders on the meter's scale**: the fader track runs exactly alongside the meter bars, so a handle at 0 dB sits level with the 0 tick. Drag the handle, click the track to jump, scroll for ±0.5 dB (Shift: ±0.1), double-click for 0 dB. Or type a value in the dB field and press Enter.
-- **Desk layout**: each bus on its own card, with Master at the far right on a tinted card.
-- **Effects accordion**: one control shows or hides every bus's effects together: a slim "▾ Effects" line when closed, and just a small "▴" beside the lists when open. Each list is as tall as the bus with the most effects needs, so nothing is hidden behind a scrollbar.
-- **No forced size**: the strips scroll both ways when the dock is small, and the top rows wrap when it's narrow.
+- **Desk layout**: each bus on its own card. Master sits at the far right on a tinted card, pinned with Discard, Commit and the reference noise above it, so it stays in view while the other buses scroll.
+- **Effects accordion**: one control shows or hides every bus's effects together. Its arrow sits at the dock's left edge and never scrolls away ("▾" closed, "▴" open), with a slim "Effects" line beside it when closed. Each list is as tall as the bus with the most effects needs, so nothing is hidden behind a scrollbar.
+- **No forced size**: the buses scroll sideways when they don't fit, the dock scrolls up and down when it's short, and the loudness readouts split over two rows when it's narrow.
 - **Commit / Discard**: changes only exist in the running game until you press **Commit**, which writes them into the project's bus layout. Only what you touched in the dock is committed, so volumes set by game code (a settings menu, a ducking script) never leak into the layout. **Discard** puts the game back how it was.
 - **Loudness meter** on the game's output (ITU-R BS.1770 / EBU R128): momentary, short-term, integrated (with how far it is from your target) and true peak.
 - **Target picker**: PC / Steam -18 LUFS, Console -24 LUFS, or a custom value. Saved per project.
 - **Reference pink noise** at exactly the target loudness:
-  - **With game**: the noise plays alongside the game, with both turned down 3 dB so a game mixed on target plus the noise still totals the target.
+  - **Both**: the noise plays alongside the game, with both turned down 3 dB so a game mixed on target plus the noise still totals the target.
   - **Solo**: only the noise plays, so you can compare it with the game by ear.
   - **Hold to solo**: hold the **Ref noise** button in the dock, or hold **P** in the game window. Let go to go back.
 - **Active switch**: turn it off and the running game stops metering and sending audio, takes its capture off Master and stops its per-frame work, so it costs nothing (handy while profiling). Remembered per project. Disabling the plugin in Project Settings removes it completely.
@@ -45,7 +45,7 @@ Keep the `.uid` files that come with the scripts. Godot uses them to find the sc
 
 ## Using the loudness meter
 
-- **I (integrated)** is the number to match to the target. It covers the whole play session since the last **Reset**, and starts fresh with every run. It pauses while the reference noise plays.
+- **I (integrated)** is the number to match to the target. It covers the whole play session since the last **Reset** (which also clears the clip lights), and starts fresh with every run. It pauses while the reference noise plays.
 - Readouts are green within ±2 LU of the target, amber below and red above. **TP** turns red above -1 dBTP.
 - Measurement happens after every effect on Master (so after a limiter, if you have one) and includes Master's fader: it reads what actually leaves the game.
 
