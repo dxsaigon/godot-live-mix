@@ -83,6 +83,10 @@ bypass, and whether each effect is on. To add a bus, route a bus
 differently, add an effect to a bus, or change an effect's settings,
 use Godot's built-in Audio tab.
 
+Live Mixer isn't audio middleware. It has no events, parameters or
+project format of its own, so it doesn't replace an FMOD-style workflow.
+It works with the buses and effects you already have.
+
 If you add or change something in the Audio tab while the game is
 running, the game won't see it until you stop it and run it again.
 Live Mixer only shows what the running game has, so a new bus or
