@@ -695,14 +695,15 @@ func _on_commit_pressed() -> void:
 	if not missing.is_empty():
 		push_error("Live Mixer: the saved layout has no bus called %s, so edits to it weren't committed. Was it added by game code at runtime?" % ", ".join(missing))
 
-	# Re-setting the layout fires bus_layout_changed, which makes the stock
-	# Audio panel rebuild and show the new values.
-	AudioServer.set_bus_layout(AudioServer.generate_bus_layout())
 	var err: Error = ResourceSaver.save(AudioServer.generate_bus_layout(), path)
 	if err != OK:
 		push_error("Live Mixer: couldn't save %s (%s). Nothing was committed to disk." % [path, error_string(err)])
 		return
 	EditorInterface.get_resource_filesystem().update_file(path)
+	# The stock Audio tab redraws its buses on bus_layout_changed. Setting
+	# volumes doesn't fire it (nor does set_bus_layout()), so without this the
+	# tab kept showing the old values until something else made it redraw.
+	AudioServer.emit_signal(&"bus_layout_changed")
 	print("Live Mixer: committed %d change(s) to %s." % [applied, path])
 
 	# Committed edits are now the saved values. Edits to missing buses stay

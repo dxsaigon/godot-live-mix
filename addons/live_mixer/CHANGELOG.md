@@ -8,6 +8,7 @@ UX improvements.
 - Strips scale more smoothly with the dock's width: they narrow before the dock starts scrolling, and long names shorten with "…".
 - The two Reset buttons are now one, which clears the clip lights and the loudness readings together.
 - The noise mode "With game" is now called "Both".
+- Fixed: after Commit, Godot's Audio tab now shows the new values straight away.
 
 ## 1.0.0 (2026-11-15)
 
